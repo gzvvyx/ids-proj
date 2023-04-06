@@ -140,3 +140,25 @@ insert into ReservationPerson (Reservation, Person) values ('2', '3');
 
 insert into ReservationService (Reservation, Service) values ('1', '2');
 insert into ReservationService (Reservation, Service) values ('2', '1');
+
+SELECT Name, Address
+FROM Employee
+WHERE Authorization = 'Manager';
+
+SELECT RoomNumber, Floor, Price
+FROM Room
+WHERE IsAvailable = 'Y';
+
+SELECT Name, Price
+FROM Service
+WHERE Price > 50;
+
+SELECT p.Name, p.Address
+FROM Person p
+JOIN ReservationPerson rp ON p.PersonID = rp.Person
+JOIN Reservation r ON rp.Reservation = r.ReservationID;
+
+SELECT SUM(Price) AS TotalPrice, Payment
+FROM Reservation
+WHERE MadeBy IN (SELECT PersonID FROM Employee WHERE Authorization = 'Admin')
+GROUP BY Payment;

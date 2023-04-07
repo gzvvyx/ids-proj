@@ -100,14 +100,15 @@ create table ReservationService (
 );
 
 insert into Room (Floor, IsAvailable, Price, Description) values ('1','Y','300.59','Apartman pro rodiny');
-insert into Room (Floor, IsAvailable, Price, Description) values ('2','N','0.257','Pokoj s dvema normalnimi postelemi');
-insert into Room (Floor, IsAvailable, Price, Description) values ('3','Y','456789.00','Pokoj s jednou spojenou posteli');
-insert into Room (Floor, IsAvailable, Price, Description) values ('3','N','456789.00','Pokoj s jednou spojenou posteli');
+insert into Room (Floor, IsAvailable, Price, Description) values ('2','N','250.257','Pokoj se dvema normalnimi postelemi');
+insert into Room (Floor, IsAvailable, Price, Description) values ('3','Y','167.00','Pokoj s jednou spojenou posteli');
+insert into Room (Floor, IsAvailable, Price, Description) values ('5','N','385.02','Pokoj, ktery jeste nebyl rezervovany');
 
 
 insert into Apartment (Room_quantity, Capacity, DoubleBed, Room) values ('3', '5', 'Y', '1');
 insert into Regular (Bed, RoomInfo) values ('2Single', '2');
 insert into Regular (Bed, RoomInfo) values ('Double', '3');
+insert into Regular (Bed, RoomInfo) values ('Double', '4');
 
 
 insert into Person (Name, Sex, Address, Mail, Birth) values ('Tomas Novy', 'Male', 'Kocotomov 38', 'kocotom@gmail.com', date '1999-01-16');
@@ -119,7 +120,7 @@ insert into Person (Name, Sex, Address, Mail, Birth) values ('Adriana Nebeska', 
 
 insert into Employee (Name, Sex, Address, Mail, Birth, Login, Authorization) values ('Josef Holy', 'Male', 'Pod mostem 69, Zlin', 'josefholy@gmial.com', date '1984-02-02', 'xholyz00', 'Employee');
 insert into Employee (Name, Sex, Address, Mail, Birth, Login, Authorization) values ('Andrea Zelena', 'Female', 'Na vyhlidce 36, Brno', 'andreazelena@email.cz', date '1991-03-03', 'xzelen00','Admin');
-insert into Employee (Name, Sex, Address, Mail, Birth, Login, Authorization) values ('Jan Modry', 'Male', 'Nad mostem 69, Ostrava', 'janmodry@gmial.com', date '1984-02-02', 'xholyz00', 'Employee');
+insert into Employee (Name, Sex, Address, Mail, Birth, Login, Authorization) values ('Jan Modry', 'Male', 'Nad mostem 69, Ostrava', 'janmodry@gmial.com', date '1984-02-02', 'xmodry00', 'Employee');
 
 
 insert into Service (Name, Price, Description) values ('Snidane', '156.65', 'Hoste maji narok na snidani v nasi restauraci po predlozeni dukazu rezervace');
@@ -132,39 +133,37 @@ insert into Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) v
 insert into Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) values (date '2023-03-24', date '2023-03-27', '77.55', 'Bitcoin', '2', '1');
 insert into Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) values (date '2023-04-24', date '2023-05-27', '343.14', 'Bitcoin', '3', '3');
 
+
 insert into RoomService (Room, Service) values ('1', '3');
 insert into RoomService (Room, Service) values ('4', '3');
-
 
 insert into ReservationPerson (Reservation, Person) values ('1', '1');
 insert into ReservationPerson (Reservation, Person) values ('1', '2');
 insert into ReservationPerson (Reservation, Person) values ('2', '3');
-
+insert into ReservationPerson (Reservation, Person) values ('4', '2');
 
 insert into ReservationService (Reservation, Service) values ('1', '2');
 insert into ReservationService (Reservation, Service) values ('2', '1');
 
--- Vypsani vsech volnych pokoju
--- Free Rooms
-SELECT RoomNumber, Floor, Price
-FROM Room
-WHERE IsAvailable = 'Y';
-
--- Rezervace a vydelek za posledni rok podle typu platby
--- Reservations last year
-SELECT Payment, COUNT(*) AS NumberOfReservations, SUM(res.Price) AS TotalRevenue
-FROM Reservation res
-WHERE res.DateFrom >= TRUNC(SYSDATE, 'YEAR')
-GROUP BY Payment;
-
 -- Pocet rezervaci podle zamestnance + maximalni a prumerna cena rezervace
--- # of res by employee + max, avg price
-SELECT e.Name as Employee_Name, COUNT(r.ReservationID) as Number_of_Reservations, MAX(r.Price) as Max_Price, AVG(r.Price) as Average_Price
+-- 2 tables
+-- Number of res by employee + max, avg price
+SELECT e.Name, e.Login as Employee_Name, COUNT(r.ReservationID) as Number_of_Reservations, MAX(r.Price) as Max_Price, AVG(r.Price) as Average_Price
 FROM Employee e
-INNER JOIN Reservation r ON e.PersonID = r.MadeBy
-GROUP BY e.Name;
+JOIN Reservation r ON e.PersonID = r.MadeBy
+GROUP BY e.Name, e.Login;
+
+-- Jmena vsech lidi v systemu a pocet jejich rezervaci (vcetne zamestnancu)
+-- 2 tables
+-- All people registered and their ResCount
+SELECT p.Name, count(r.ReservationID) AS ReservationCount
+FROM Person p
+LEFT JOIN Reservation r ON p.PersonID = r.MadeBy
+GROUP BY p.Name
+ORDER BY ReservationCount DESC;
 
 -- Vsechny nekdy rezervovane mistnosti
+-- 3 tables
 -- Ever reserved rooms with service #3
 SELECT r.*
 FROM Room r
@@ -176,46 +175,40 @@ AND r.RoomNumber IN (
   FROM Reservation
 );
 
--- vypise jmena a loginy vsech zamestnancu, kteri vytvorili rezervaci
-SELECT e.Name, e.Login
-FROM Employee e
-INNER JOIN Reservation r ON e.PersonID = r.MadeBy;
+-- Rezervace a vydelek za posledni rok podle typu platby
+-- Agg. func + group by
+-- Reservations last year
+SELECT Payment, COUNT(*) AS NumberOfReservations, SUM(res.Price) AS TotalRevenue
+FROM Reservation res
+WHERE res.DateFrom >= TRUNC(SYSDATE, 'YEAR')
+GROUP BY Payment;
 
--- vypise nazev a cenu vsech sluzeb, ktere byli zahrnuty do rezervaci
-SELECT s.Name, s.Price
-FROM Service s
-INNER JOIN ReservationService rs ON s.ServiceID = rs.Service
-INNER JOIN Reservation r ON rs.Reservation = r.ReservationID;
-
--- vypise informacie o rezervaciich vytvorenych zamestancema a sluzbach pozadovanych v techto rezervacich
-SELECT r.ReservationID, p.Name, s.Name, rs.DateRequested
-FROM Reservation r
-JOIN ReservationPerson rp ON r.ReservationID = rp.Reservation
-JOIN Person p ON rp.Person = p.PersonID
-JOIN ReservationService rs ON r.ReservationID = rs.Reservation
-JOIN Service s ON rs.Service = s.ServiceID;
-
--- vypise vsechny pokoje a zda je pokoj rezervovany
-SELECT Room.RoomNumber, COUNT(Reservation.ReservationID) AS NumReservations
-FROM Room
-LEFT JOIN Reservation ON Room.RoomNumber = Reservation.RoomNumber
-GROUP BY Room.RoomNumber;
-
--- vypise prumernou cenu pokoju pro kazdy patro
+-- Prumerna cena pokoju pro kazde patro
+-- Agg. func + group by
+-- Avg price each floor
 SELECT Floor, AVG(Price) AS AvgPrice
 FROM Room
 GROUP BY Floor;
 
--- vypise vsechna cisla pokoju, kterych rezervace byla zaplacena kartou
-SELECT * FROM Room
-WHERE RoomNumber IN (
-  SELECT RoomNumber FROM Reservation
-  WHERE Payment = 'Card'
+-- Vsechny pokoje, ktere byly nekdy rezervovany
+-- EXISTS predicate
+-- Rooms ever reserved
+SELECT * FROM Room r
+WHERE EXISTS (
+  SELECT * FROM Reservation res
+  WHERE res.RoomNumber = r.RoomNumber
+)
+ORDER BY RoomNumber;
+
+-- Pokoje typu regular, ktere maji typ postele double
+-- IN predicate
+-- Regular rooms with double beds
+SELECT *
+FROM Room
+WHERE Room.RoomNumber IN (
+  SELECT RoomInfo
+  FROM Regular
+  WHERE Bed = 'Double'
 );
 
--- vypise true kdyz alespon jedna rezervace byla vytvorena uzivatelem s danym ID
-SELECT * FROM Person p
-WHERE EXISTS (
-  SELECT 1 FROM Reservation r
-  WHERE r.MadeBy = p.PersonID
-);
+

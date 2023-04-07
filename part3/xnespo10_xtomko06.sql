@@ -102,6 +102,7 @@ create table ReservationService (
 insert into Room (Floor, IsAvailable, Price, Description) values ('1','Y','300.59','Apartman pro rodiny');
 insert into Room (Floor, IsAvailable, Price, Description) values ('2','N','0.257','Pokoj s dvema normalnimi postelemi');
 insert into Room (Floor, IsAvailable, Price, Description) values ('3','Y','456789.00','Pokoj s jednou spojenou posteli');
+insert into Room (Floor, IsAvailable, Price, Description) values ('3','N','456789.00','Pokoj s jednou spojenou posteli');
 
 
 insert into Apartment (Room_quantity, Capacity, DoubleBed, Room) values ('3', '5', 'Y', '1');
@@ -118,6 +119,7 @@ insert into Person (Name, Sex, Address, Mail, Birth) values ('Adriana Nebeska', 
 
 insert into Employee (Name, Sex, Address, Mail, Birth, Login, Authorization) values ('Josef Holy', 'Male', 'Pod mostem 69, Zlin', 'josefholy@gmial.com', date '1984-02-02', 'xholyz00', 'Employee');
 insert into Employee (Name, Sex, Address, Mail, Birth, Login, Authorization) values ('Andrea Zelena', 'Female', 'Na vyhlidce 36, Brno', 'andreazelena@email.cz', date '1991-03-03', 'xzelen00','Admin');
+insert into Employee (Name, Sex, Address, Mail, Birth, Login, Authorization) values ('Jan Modry', 'Male', 'Nad mostem 69, Ostrava', 'janmodry@gmial.com', date '1984-02-02', 'xholyz00', 'Employee');
 
 
 insert into Service (Name, Price, Description) values ('Snidane', '156.65', 'Hoste maji narok na snidani v nasi restauraci po predlozeni dukazu rezervace');
@@ -125,12 +127,13 @@ insert into Service (Name, Price, Description) values ('Uklid po vystehovani', '
 insert into Service (Name, Price, Description) values ('Bezbarierovy pristup', '0', 'Pokoj s bezbarierovym pristupem');
 
 
-insert into Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) values (date '2023-03-24', date '2023-03-27', '55.55', 'Bitcoin', '1', '1');
+insert into Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) values (date '2023-03-24', date '2023-03-27', '55.55', 'Card', '1', '1');
 insert into Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) values (date '2023-03-28', date '2023-03-29', '66.55', 'Cash', '1', '1');
-insert into Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) values (date '2023-03-24', date '2023-03-27', '77.55', 'Card', '2', '2');
-
+insert into Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) values (date '2023-03-24', date '2023-03-27', '77.55', 'Bitcoin', '2', '1');
+insert into Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) values (date '2023-04-24', date '2023-05-27', '343.14', 'Bitcoin', '3', '3');
 
 insert into RoomService (Room, Service) values ('1', '3');
+insert into RoomService (Room, Service) values ('4', '3');
 
 
 insert into ReservationPerson (Reservation, Person) values ('1', '1');
@@ -141,24 +144,35 @@ insert into ReservationPerson (Reservation, Person) values ('2', '3');
 insert into ReservationService (Reservation, Service) values ('1', '2');
 insert into ReservationService (Reservation, Service) values ('2', '1');
 
-SELECT Name, Address
-FROM Employee
-WHERE Authorization = 'Manager';
-
+-- Vypsani vsech volnych pokoju
+-- Free Rooms
 SELECT RoomNumber, Floor, Price
 FROM Room
 WHERE IsAvailable = 'Y';
 
-SELECT Name, Price
-FROM Service
-WHERE Price > 50;
-
-SELECT p.Name, p.Address
-FROM Person p
-JOIN ReservationPerson rp ON p.PersonID = rp.Person
-JOIN Reservation r ON rp.Reservation = r.ReservationID;
-
-SELECT SUM(Price) AS TotalPrice, Payment
-FROM Reservation
-WHERE MadeBy IN (SELECT PersonID FROM Employee WHERE Authorization = 'Admin')
+-- Rezervace a vydelek za posledni rok podle typu platby
+-- Reservations last year
+SELECT Payment, COUNT(*) AS NumberOfReservations, SUM(res.Price) AS TotalRevenue
+FROM Reservation res
+WHERE res.DateFrom >= TRUNC(SYSDATE, 'YEAR')
 GROUP BY Payment;
+
+-- Pocet rezervaci podle zamestnance + maximalni a prumerna cena rezervace
+-- # of res by employee + max, avg price
+SELECT e.Name as Employee_Name, COUNT(r.ReservationID) as Number_of_Reservations, MAX(r.Price) as Max_Price, AVG(r.Price) as Average_Price
+FROM Employee e
+INNER JOIN Reservation r ON e.PersonID = r.MadeBy
+GROUP BY e.Name;
+
+-- Vsechny nekdy rezervovane mistnosti
+-- Ever reserved rooms with service #3
+SELECT r.*
+FROM Room r
+JOIN RoomService rs ON r.RoomNumber = rs.Room
+JOIN Service s ON rs.Service = s.ServiceID
+WHERE s.ServiceID = 3
+AND r.RoomNumber IN (
+  SELECT DISTINCT RoomNumber
+  FROM Reservation
+);
+

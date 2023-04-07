@@ -176,3 +176,46 @@ AND r.RoomNumber IN (
   FROM Reservation
 );
 
+-- vypise jmena a loginy vsech zamestnancu, kteri vytvorili rezervaci
+SELECT e.Name, e.Login
+FROM Employee e
+INNER JOIN Reservation r ON e.PersonID = r.MadeBy;
+
+-- vypise nazev a cenu vsech sluzeb, ktere byli zahrnuty do rezervaci
+SELECT s.Name, s.Price
+FROM Service s
+INNER JOIN ReservationService rs ON s.ServiceID = rs.Service
+INNER JOIN Reservation r ON rs.Reservation = r.ReservationID;
+
+-- vypise informacie o rezervaciich vytvorenych zamestancema a sluzbach pozadovanych v techto rezervacich
+SELECT r.ReservationID, p.Name, s.Name, rs.DateRequested
+FROM Reservation r
+JOIN ReservationPerson rp ON r.ReservationID = rp.Reservation
+JOIN Person p ON rp.Person = p.PersonID
+JOIN ReservationService rs ON r.ReservationID = rs.Reservation
+JOIN Service s ON rs.Service = s.ServiceID;
+
+-- vypise vsechny pokoje a zda je pokoj rezervovany
+SELECT Room.RoomNumber, COUNT(Reservation.ReservationID) AS NumReservations
+FROM Room
+LEFT JOIN Reservation ON Room.RoomNumber = Reservation.RoomNumber
+GROUP BY Room.RoomNumber;
+
+-- vypise prumernou cenu pokoju pro kazdy patro
+SELECT Floor, AVG(Price) AS AvgPrice
+FROM Room
+GROUP BY Floor;
+
+-- vypise vsechna cisla pokoju, kterych rezervace byla zaplacena kartou
+SELECT * FROM Room
+WHERE RoomNumber IN (
+  SELECT RoomNumber FROM Reservation
+  WHERE Payment = 'Card'
+);
+
+-- vypise true kdyz alespon jedna rezervace byla vytvorena uzivatelem s danym ID
+SELECT * FROM Person p
+WHERE EXISTS (
+  SELECT 1 FROM Reservation r
+  WHERE r.MadeBy = p.PersonID
+);

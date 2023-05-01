@@ -144,6 +144,125 @@ insert into ReservationPerson (Reservation, Person) values ('4', '2');
 
 insert into ReservationService (Reservation, Service) values ('1', '2');
 insert into ReservationService (Reservation, Service) values ('2', '1');
+insert into ReservationService (Reservation, Service) values ('4', '1');
+
+-- First trigger
+-- Update price of a reservation whenever a new room is added or removed from it
+CREATE OR REPLACE TRIGGER update_reservation_price
+AFTER INSERT OR DELETE ON ReservationPerson
+FOR EACH ROW
+DECLARE
+  reservation_id Reservation.ReservationID%TYPE;
+  new_price Reservation.Price%TYPE;
+BEGIN
+  reservation_id := :new.Reservation;
+  SELECT SUM(Room.Price) INTO new_price
+  FROM ReservationPerson
+  JOIN Room ON ReservationPerson.RoomNumber = Room.RoomNumber
+  WHERE ReservationPerson.Reservation = reservation_id;
+  UPDATE Reservation SET Price = new_price WHERE ReservationID = reservation_id;
+END;
+
+-- Second trigger
+-- trigger that prevents the deletion of a Room if it is currently part of an active reservation
+CREATE OR REPLACE TRIGGER prevent_room_deletion
+BEFORE DELETE ON Room
+FOR EACH ROW
+DECLARE
+  reservation_count NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO reservation_count
+  FROM Reservation
+  WHERE RoomNumber = :old.RoomNumber
+    AND DateTo > SYSDATE;
+  IF reservation_count > 0 THEN
+    RAISE_APPLICATION_ERROR(-20001, 'Cannot delete room that is part of an active reservation.');
+  END IF;
+END;
+
+
+-- First procedure
+-- Update the price of a service based on the input ServiceID
+CREATE OR REPLACE PROCEDURE update_service_price
+    (p_service_id IN Service.ServiceID%TYPE, 
+     p_new_price IN Service.Price%TYPE)
+IS
+BEGIN
+    UPDATE Service SET Price = p_new_price WHERE ServiceID = p_service_id;
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('Service price updated successfully.');
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        DBMS_OUTPUT.PUT_LINE('Invalid Service ID');
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error occurred: ' || SQLERRM);
+        ROLLBACK;
+END;
+
+
+-- Second procedure
+-- Use cursor to display all reservations for a given room number
+CREATE OR REPLACE PROCEDURE display_reservations_for_room
+    (p_room_number IN Room.RoomNumber%TYPE)
+IS
+    CURSOR c_reservations IS 
+        SELECT ReservationID, DateFrom, DateTo, Price 
+        FROM Reservation 
+        WHERE RoomNumber = p_room_number;
+    v_reservation_id Reservation.ReservationID%TYPE;
+    v_date_from Reservation.DateFrom%TYPE;
+    v_date_to Reservation.DateTo%TYPE;
+    v_price Reservation.Price%TYPE;
+BEGIN
+    OPEN c_reservations;
+    DBMS_OUTPUT.PUT_LINE('Reservations for Room ' || p_room_number || ':');
+    LOOP
+        FETCH c_reservations INTO v_reservation_id, v_date_from, v_date_to, v_price;
+        EXIT WHEN c_reservations%NOTFOUND;
+        DBMS_OUTPUT.PUT_LINE(v_reservation_id || ' ' || v_date_from || ' ' || v_date_to || ' ' || v_price);
+    END LOOP;
+    CLOSE c_reservations;
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error occurred: ' || SQLERRM);
+END;
+
+-- WITH clause to define a sub-query that joins together the Reservation, ReservationPerson, Person, ReservationService, and Service tables
+-- Retrieves information about each reservation and the people and services associated with it
+-- Complete reservation info
+WITH reservation_info AS (
+  SELECT 
+    r.ReservationID, 
+    r.DateFrom, 
+    r.DateTo, 
+    r.Price, 
+    r.Payment,
+    rp.Person,
+    p.Name,
+    rs.Service,
+    s.Name AS ServiceName,
+    rs.Service * s.Price AS ServicePrice
+  FROM Reservation r
+  LEFT JOIN ReservationPerson rp ON r.ReservationID = rp.Reservation
+  LEFT JOIN Person p ON rp.Person = p.PersonID
+  LEFT JOIN ReservationService rs ON r.ReservationID = rs.Reservation
+  LEFT JOIN Service s ON rs.Service = s.ServiceID
+)
+SELECT 
+  ReservationID, 
+  Name, 
+  DateFrom, 
+  DateTo, 
+  Price, 
+  Payment,
+  CASE 
+    WHEN ServicePrice IS NOT NULL THEN Price + ServicePrice
+    ELSE Price
+  END AS TotalPrice
+FROM reservation_info
+ORDER BY ReservationID;
+
+----------------------------------- SELECTS -------------------------------------------
 
 -- Pocet rezervaci podle zamestnance + maximalni a prumerna cena rezervace
 -- 2 tables
@@ -211,111 +330,41 @@ WHERE Room.RoomNumber IN (
   WHERE Bed = 'Double'
 );
 
--- trigger that updates the price of a reservation whenever a new room is added or removed from it
-CREATE OR REPLACE TRIGGER update_reservation_price
-AFTER INSERT OR DELETE ON ReservationPerson
-FOR EACH ROW
-DECLARE
-  reservation_id Reservation.ReservationID%TYPE;
-  new_price Reservation.Price%TYPE;
-BEGIN
-  reservation_id := :new.Reservation;
-  SELECT SUM(Room.Price) INTO new_price
-  FROM ReservationPerson
-  JOIN Room ON ReservationPerson.RoomNumber = Room.RoomNumber
-  WHERE ReservationPerson.Reservation = reservation_id;
-  UPDATE Reservation SET Price = new_price WHERE ReservationID = reservation_id;
-END;
+----------------------------- INDEX DEMONSTRATION -------------------------------------
 
--- trigger that prevents the deletion of a Room if it is currently part of an active reservation
-CREATE OR REPLACE TRIGGER prevent_room_deletion
-BEFORE DELETE ON Room
-FOR EACH ROW
-DECLARE
-  reservation_count NUMBER;
-BEGIN
-  SELECT COUNT(*) INTO reservation_count
-  FROM Reservation
-  WHERE RoomNumber = :old.RoomNumber
-    AND DateTo > SYSDATE;
-  IF reservation_count > 0 THEN
-    RAISE_APPLICATION_ERROR(-20001, 'Cannot delete room that is part of an active reservation.');
-  END IF;
-END;
+-- Pocet rezervaci vytvorenych zamestnanci zenskeho pohlavi
+-- Count of reservations made by women 1
+EXPLAIN PLAN FOR
+    SELECT
+        E.Name,
+        COUNT(R.ReservationID) AS pocet_rezervaci
+    FROM Employee E
+    JOIN Reservation R ON E.PersonID = R.madeBy
+    WHERE E.Sex = 'Female'
+    GROUP BY E.Name
+    ORDER BY E.Name;
 
--- This procedure updates the price of a service based on the input ServiceID
-CREATE OR REPLACE PROCEDURE update_service_price
-    (p_service_id IN Service.ServiceID%TYPE, 
-     p_new_price IN Service.Price%TYPE)
-IS
-BEGIN
-    UPDATE Service SET Price = p_new_price WHERE ServiceID = p_service_id;
-    COMMIT;
-    DBMS_OUTPUT.PUT_LINE('Service price updated successfully.');
-EXCEPTION
-    WHEN NO_DATA_FOUND THEN
-        DBMS_OUTPUT.PUT_LINE('Invalid Service ID');
-    WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('Error occurred: ' || SQLERRM);
-        ROLLBACK;
-END;
+-- PLAN w/o index
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY());
 
--- This procedure uses a cursor to display all reservations for a given room number
-CREATE OR REPLACE PROCEDURE display_reservations_for_room
-    (p_room_number IN Room.RoomNumber%TYPE)
-IS
-    CURSOR c_reservations IS 
-        SELECT ReservationID, DateFrom, DateTo, Price 
-        FROM Reservation 
-        WHERE RoomNumber = p_room_number;
-    v_reservation_id Reservation.ReservationID%TYPE;
-    v_date_from Reservation.DateFrom%TYPE;
-    v_date_to Reservation.DateTo%TYPE;
-    v_price Reservation.Price%TYPE;
-BEGIN
-    OPEN c_reservations;
-    DBMS_OUTPUT.PUT_LINE('Reservations for Room ' || p_room_number || ':');
-    LOOP
-        FETCH c_reservations INTO v_reservation_id, v_date_from, v_date_to, v_price;
-        EXIT WHEN c_reservations%NOTFOUND;
-        DBMS_OUTPUT.PUT_LINE(v_reservation_id || ' ' || v_date_from || ' ' || v_date_to || ' ' || v_price);
-    END LOOP;
-    CLOSE c_reservations;
-EXCEPTION
-    WHEN OTHERS THEN
-        DBMS_OUTPUT.PUT_LINE('Error occurred: ' || SQLERRM);
-END;
+CREATE INDEX sex_idx
+ON Employee (Sex);
+CREATE INDEX name_idx
+ON Employee (Name);
 
--- WITH clause to define a subquery that joins together the Reservation, ReservationPerson, Person, ReservationService, and Service tables
--- retrievs information about each reservation and the people and services associated with it
-WITH reservation_info AS (
-  SELECT 
-    r.ReservationID, 
-    r.DateFrom, 
-    r.DateTo, 
-    r.Price, 
-    r.Payment,
-    rp.Person,
-    p.Name,
-    rs.Service,
-    s.Name AS ServiceName,
-    rs.Service * s.Price AS ServicePrice
-  FROM Reservation r
-  LEFT JOIN ReservationPerson rp ON r.ReservationID = rp.Reservation
-  LEFT JOIN Person p ON rp.Person = p.PersonID
-  LEFT JOIN ReservationService rs ON r.ReservationID = rs.Reservation
-  LEFT JOIN Service s ON rs.Service = s.ServiceID
-)
-SELECT 
-  ReservationID, 
-  Name, 
-  DateFrom, 
-  DateTo, 
-  Price, 
-  Payment,
-  CASE 
-    WHEN ServicePrice IS NOT NULL THEN Price + ServicePrice
-    ELSE Price
-  END AS TotalPrice
-FROM reservation_info
-ORDER BY ReservationID;
+-- Pocet rezervaci vytvorenych zamestnanci zenskeho pohlavi
+EXPLAIN PLAN FOR
+    SELECT
+        E.Name,
+        COUNT(R.ReservationID) AS pocet_rezervaci
+    FROM Employee E
+    JOIN Reservation R ON E.PersonID = R.madeBy
+    WHERE E.Sex = 'Female'
+    GROUP BY E.Name
+    ORDER BY E.Name;
+
+-- PLAN w/ index
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY());
+
+DROP INDEX sex_idx;
+DROP INDEX name_idx;

@@ -99,7 +99,7 @@ create table ReservationService (
     FOREIGN KEY (Service) REFERENCES Service(ServiceID) on delete cascade
 );
 
-insert into Room (Floor, IsAvailable, Price, Description) values ('1','Y','300.59','Apartman pro rodiny');
+insert into Room (Floor, IsAvailable, Price, Description) values ('1','N','305.59','Apartman pro rodiny');
 insert into Room (Floor, IsAvailable, Price, Description) values ('2','N','250.257','Pokoj se dvema normalnimi postelemi');
 insert into Room (Floor, IsAvailable, Price, Description) values ('3','Y','167.00','Pokoj s jednou spojenou posteli');
 insert into Room (Floor, IsAvailable, Price, Description) values ('5','N','385.02','Pokoj, ktery jeste nebyl rezervovany');
@@ -126,6 +126,7 @@ insert into Employee (Name, Sex, Address, Mail, Birth, Login, Authorization) val
 insert into Service (Name, Price, Description) values ('Snidane', '156.65', 'Hoste maji narok na snidani v nasi restauraci po predlozeni dukazu rezervace');
 insert into Service (Name, Price, Description) values ('Uklid po vystehovani', '18832.00', 'Automaticka sluzba po vystehovani');
 insert into Service (Name, Price, Description) values ('Bezbarierovy pristup', '0', 'Pokoj s bezbarierovym pristupem');
+insert into Service (Name, Price, Description) values ('Vecere', '100', 'Vecere');
 
 
 insert into Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) values (date '2023-03-24', date '2023-03-27', '55.55', 'Card', '1', '1');
@@ -146,45 +147,47 @@ insert into ReservationService (Reservation, Service) values ('1', '2');
 insert into ReservationService (Reservation, Service) values ('2', '1');
 insert into ReservationService (Reservation, Service) values ('4', '1');
 
--- First trigger
+------------------------------------- TRIGGERS ----------------------------------------
+
+-- Trigger 1
 -- Update price of a reservation whenever a new room is added or removed from it
 CREATE OR REPLACE TRIGGER update_reservation_price
-AFTER INSERT OR DELETE ON ReservationPerson
+AFTER INSERT ON ReservationService
 FOR EACH ROW
 DECLARE
-  reservation_id Reservation.ReservationID%TYPE;
-  new_price Reservation.Price%TYPE;
+    new_service_price Service.Price%TYPE;
 BEGIN
-  reservation_id := :new.Reservation;
-  SELECT SUM(Room.Price) INTO new_price
-  FROM ReservationPerson
-  JOIN Room ON ReservationPerson.RoomNumber = Room.RoomNumber
-  WHERE ReservationPerson.Reservation = reservation_id;
-  UPDATE Reservation SET Price = new_price WHERE ReservationID = reservation_id;
+    -- Get the price of the newly added service
+    SELECT Price INTO new_service_price FROM Service WHERE ServiceID = :new.Service;
+
+    -- Update the reservation price by adding the price of the new service
+    UPDATE Reservation
+    SET Price = Price + new_service_price
+    WHERE ReservationID = :new.Reservation;
 END;
 
--- Second trigger
+INSERT INTO ReservationService (Reservation, Service) values ('1', '4');
+
+-- Trigger 2
 -- trigger that prevents the deletion of a Room if it is currently part of an active reservation
-CREATE OR REPLACE TRIGGER prevent_room_deletion
-BEFORE DELETE ON Room
+CREATE OR REPLACE TRIGGER check_reservation_date
+BEFORE INSERT ON Reservation
 FOR EACH ROW
-DECLARE
-  reservation_count NUMBER;
 BEGIN
-  SELECT COUNT(*) INTO reservation_count
-  FROM Reservation
-  WHERE RoomNumber = :old.RoomNumber
-    AND DateTo > SYSDATE;
-  IF reservation_count > 0 THEN
-    RAISE_APPLICATION_ERROR(-20001, 'Cannot delete room that is part of an active reservation.');
-  END IF;
+    IF :new.DateFrom < SYSDATE THEN
+        RAISE_APPLICATION_ERROR(-20000, 'Cannot make a reservation with a start date in the past.');
+    END IF;
 END;
 
+-- Vyhodi error
+-- INSERT INTO Reservation (DateFrom, DateTo, Price, Payment, RoomNumber, MadeBy) values (date '1000-03-24', date '1000-03-27', '55.55', 'Card', '1', '1');
 
--- First procedure
+------------------------------------- PROCEDURES --------------------------------------
+
+-- Procedure 1
 -- Update the price of a service based on the input ServiceID
 CREATE OR REPLACE PROCEDURE update_service_price
-    (p_service_id IN Service.ServiceID%TYPE, 
+    (p_service_id IN Service.ServiceID%TYPE,
      p_new_price IN Service.Price%TYPE)
 IS
 BEGIN
@@ -200,14 +203,14 @@ EXCEPTION
 END;
 
 
--- Second procedure
+-- Procedure 2
 -- Use cursor to display all reservations for a given room number
 CREATE OR REPLACE PROCEDURE display_reservations_for_room
     (p_room_number IN Room.RoomNumber%TYPE)
 IS
-    CURSOR c_reservations IS 
-        SELECT ReservationID, DateFrom, DateTo, Price 
-        FROM Reservation 
+    CURSOR c_reservations IS
+        SELECT ReservationID, DateFrom, DateTo, Price
+        FROM Reservation
         WHERE RoomNumber = p_room_number;
     v_reservation_id Reservation.ReservationID%TYPE;
     v_date_from Reservation.DateFrom%TYPE;
@@ -227,40 +230,58 @@ EXCEPTION
         DBMS_OUTPUT.PUT_LINE('Error occurred: ' || SQLERRM);
 END;
 
--- WITH clause to define a sub-query that joins together the Reservation, ReservationPerson, Person, ReservationService, and Service tables
--- Retrieves information about each reservation and the people and services associated with it
--- Complete reservation info
+-- Old service price
+-- SELECT Name, Price FROM Service
+-- WHERE ServiceID = 1;
+
+-- Potřeba DBMSOUTPUT pro zobrazení outputu (CTRL + F8)
+-- Změny pro Proceduru2 můžeme vidět také skrze zakomentované selecty
+BEGIN
+    update_service_price(1, 10);
+    display_reservations_for_room(1);
+end;
+
+-- New service price
+-- SELECT Name, Price FROM Service
+-- WHERE ServiceID = 1;
+
+------------------------------ SELECT w/ WITH & CASE -----------------------------------
+
+-- WITH klauzle k definici sub-query, která spojí tabulky Reservation, ReservationPerson, Person, ReservationService a Service
+-- Získá infomrace o všech rezervacích
+-- Complete reservation info W&C select
 WITH reservation_info AS (
-  SELECT 
-    r.ReservationID, 
-    r.DateFrom, 
-    r.DateTo, 
-    r.Price, 
+  SELECT
+    r.ReservationID,
+    r.DateFrom,
+    r.DateTo,
+    r.Price,
     r.Payment,
     rp.Person,
     p.Name,
     rs.Service,
     s.Name AS ServiceName,
-    rs.Service * s.Price AS ServicePrice
+    s.Price AS ServicePrice
   FROM Reservation r
   LEFT JOIN ReservationPerson rp ON r.ReservationID = rp.Reservation
   LEFT JOIN Person p ON rp.Person = p.PersonID
   LEFT JOIN ReservationService rs ON r.ReservationID = rs.Reservation
   LEFT JOIN Service s ON rs.Service = s.ServiceID
 )
-SELECT 
-  ReservationID, 
-  Name, 
-  DateFrom, 
-  DateTo, 
-  Price, 
+SELECT
+  ReservationID,
+  Name,
+  DateFrom,
+  DateTo,
+  Price,
   Payment,
-  CASE 
-    WHEN ServicePrice IS NOT NULL THEN Price + ServicePrice
+  CASE
+    WHEN ServicePrice IS NOT NULL THEN Price + SUM(ServicePrice) OVER (PARTITION BY ReservationID)
     ELSE Price
   END AS TotalPrice
 FROM reservation_info
 ORDER BY ReservationID;
+
 
 ----------------------------------- SELECTS -------------------------------------------
 
@@ -333,7 +354,7 @@ WHERE Room.RoomNumber IN (
 ----------------------------- INDEX DEMONSTRATION -------------------------------------
 
 -- Pocet rezervaci vytvorenych zamestnanci zenskeho pohlavi
--- Count of reservations made by women 1
+-- Count of reservations made by women v1
 EXPLAIN PLAN FOR
     SELECT
         E.Name,
@@ -353,6 +374,7 @@ CREATE INDEX name_idx
 ON Employee (Name);
 
 -- Pocet rezervaci vytvorenych zamestnanci zenskeho pohlavi
+-- Count of reservations made by women v2
 EXPLAIN PLAN FOR
     SELECT
         E.Name,
@@ -369,15 +391,46 @@ SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY());
 DROP INDEX sex_idx;
 DROP INDEX name_idx;
 
--- materialized view of all available rooms in a hotel
+----------------------------------- RIGHTS -------------------------------------------
+
+GRANT ALL ON Person TO XTOMKO06;
+GRANT ALL ON Employee TO XTOMKO06;
+GRANT ALL ON Room TO XTOMKO06;
+GRANT ALL ON Reservation TO XTOMKO06;
+GRANT ALL ON Apartment TO XTOMKO06;
+GRANT ALL ON Regular TO XTOMKO06;
+GRANT ALL ON Service TO XTOMKO06;
+GRANT ALL ON RoomService TO XTOMKO06;
+GRANT ALL ON ReservationPerson TO XTOMKO06;
+GRANT ALL ON ReservationService TO XTOMKO06;
+
+GRANT ALL ON update_service_price TO XTOMKO06;
+GRANT ALL ON display_reservations_for_room TO XTOMKO06;
+
+------------------------------- MATERIALIZED VIEW ------------------------------------
+
+-- XTOMKO06 script
+-- Materialized view of all available rooms in a hotel
+DROP MATERIALIZED VIEW available_rooms;
 CREATE MATERIALIZED VIEW available_rooms
 BUILD IMMEDIATE
-REFRESH COMPLETE ON DEMAND
+REFRESH COMPLETE ON COMMIT
 AS SELECT RoomNumber, Floor, Price, Description
-FROM Room
+FROM XNESPO10.Room
 WHERE IsAvailable = 'Y';
 
--- access right for teammate
-REVOKE ALL ON Room FROM xtomko06;
-GRANT SELECT, UPDATE, INSERT, DELETE ON Room TO xtomko06;
+-- XTOMKO06 by dal prava XNESPO10
+GRANT ALL ON available_rooms TO XTOMKO06;
 
+-- Materialized view
+SELECT * FROM available_rooms;
+-- XTOMKO06.available_rooms
+
+-- Set Room 1 as available
+UPDATE XNESPO10.Room SET IsAvailable = 'Y'
+WHERE RoomNumber = 1;
+COMMIT;
+
+-- Updated materialized view
+SELECT * FROM available_rooms;
+-- XTOMKO06.available_rooms

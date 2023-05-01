@@ -376,3 +376,8 @@ REFRESH COMPLETE ON DEMAND
 AS SELECT RoomNumber, Floor, Price, Description
 FROM Room
 WHERE IsAvailable = 'Y';
+
+-- access right for teammate
+REVOKE ALL ON Room FROM xtomko06;
+GRANT SELECT, UPDATE, INSERT, DELETE ON Room TO xtomko06;
+

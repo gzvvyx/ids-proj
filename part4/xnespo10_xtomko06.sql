@@ -368,3 +368,11 @@ SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY());
 
 DROP INDEX sex_idx;
 DROP INDEX name_idx;
+
+-- materialized view of all available rooms in a hotel
+CREATE MATERIALIZED VIEW available_rooms
+BUILD IMMEDIATE
+REFRESH COMPLETE ON DEMAND
+AS SELECT RoomNumber, Floor, Price, Description
+FROM Room
+WHERE IsAvailable = 'Y';
